@@ -115,6 +115,13 @@ export const config = {
    * 托管后 frpc 作为本进程的子进程运行，服务随计划任务自启时 frpc 一起起来。
    */
   frpcConfig: process.env.FRPC_CONFIG || '',
+  /**
+   * /nowapi 读取的 v2rayN 便携版目录；留空则按常见落点自动探测。
+   * 这个接口会把当前节点的分享链接原样吐出来，等价于公开代理凭据，
+   * 所以对外部署时务必配 NOWAPI_TOKEN。
+   */
+  v2rayNDir: process.env.V2RAYN_DIR || '',
+  nowapiToken: process.env.NOWAPI_TOKEN || '',
   sessionSecret: resolveSecret(),
   sessionTtlHours: num(process.env.SESSION_TTL_HOURS, 12),
   chromePath: detectChrome(),

@@ -9,6 +9,7 @@ import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { config, ensureDirs } from './config.js';
 import { seed, getSettings } from './db.js';
 import { userByToken } from './auth.js';
@@ -19,6 +20,7 @@ import { attachScreenWebSocket } from './ws/stream.js';
 import { manager } from './browser/manager.js';
 import { muteLiveSessions } from './util/mute-audio.js';
 import { startFrpc, stopFrpc } from './util/frpc.js';
+import { getCurrentNode } from './util/nodeinfo.js';
 import { logger } from './util/logger.js';
 
 ensureDirs();
@@ -85,6 +87,57 @@ app.get('/admin', (req, res) => {
   return res.sendFile(page('admin.html'));
 });
 
+/** 定长比较，避免按字符逐位比较泄漏 token 长度与内容 */
+function tokenMatches(given, expected) {
+  const a = Buffer.from(String(given ?? ''), 'utf-8');
+  const b = Buffer.from(String(expected), 'utf-8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * GET /nowapi —— 返回本机代理（v2rayN）当前选中的节点。
+ *
+ * 默认吐纯文本，就是一行分享链接，curl / 手机快捷指令可以直接取；
+ * 加 ?format=json 返回结构化信息（协议、名称、地址、端口、链接、读取时间）。
+ *
+ * 这条路由刻意不要求登录：它一般给外部脚本轮询用。但「节点链接」等于代理凭据，
+ * 配了 NOWAPI_TOKEN 就必须带 ?token=xxx 或 X-Nowapi-Token 头才能取。
+ */
+app.get('/nowapi', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  if (config.nowapiToken) {
+    const given = req.query.token ?? req.get('x-nowapi-token') ?? '';
+    if (!tokenMatches(given, config.nowapiToken)) {
+      return res.status(403).type('text/plain').send('403 forbidden：token 无效\n');
+    }
+  }
+
+  const info = getCurrentNode();
+  const wantsJson = String(req.query.format || '').toLowerCase() === 'json';
+
+  if (!info.ok) {
+    if (wantsJson) return res.status(503).json(info);
+    return res
+      .status(503)
+      .type('text/plain')
+      .send(`# 取不到当前节点：${info.error}\n# ${info.message}\n`);
+  }
+
+  if (wantsJson) return res.json(info);
+
+  if (!info.link) {
+    return res
+      .status(501)
+      .type('text/plain')
+      .send(`# 当前节点是 ${info.protocol}（${info.name}），该协议没有单条分享链接的表示\n# 加 ?format=json 可拿到结构化字段\n`);
+  }
+
+  return res.type('text/plain').send(`${info.link}\n`);
+});
+
 app.use('/api/auth', authRouter);
 app.use('/api/sessions', sessionRouter);
 app.use('/api/admin', adminRouter);
@@ -148,6 +201,12 @@ server.listen(config.port, config.host, async () => {
   muteTimer.unref?.();
   // 可选：把 frpc 交给本服务托管（配置了 FRPC_CONFIG 才启用）
   startFrpc().catch((err) => logger.warn('启动 frpc 失败', err.message));
+  // /nowapi 会原文吐出当前节点链接，等于代理凭据；没设口令时明确提醒一句
+  if (!config.nowapiToken) {
+    logger.warn(
+      `/nowapi 未设置 NOWAPI_TOKEN：任何能访问本服务的人都能取到当前代理节点（${config.publicUrl || `http://localhost:${config.port}`}/nowapi）`,
+    );
+  }
 });
 
 const shutdown = async (signal) => {
