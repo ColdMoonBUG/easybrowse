@@ -23,7 +23,7 @@
 | **各听各的声音** | 页面音频由注入钩子采集成 24kHz 单声道 PCM，只沿该用户自己的连接送回他的浏览器播放（WebAudio 排队，延迟约 100ms）。用户在顶栏点扬声器开启，服务器与管理端始终无声。覆盖页面 WebAudio、同源媒体与 MSE 流（B 站 / YouTube 这类主流视频站）；未声明 crossorigin 的跨域直链媒体受浏览器安全策略限制，声音拿不到 |
 | 管理后台 | 仪表盘（在线用户、活动会话、今日/累计流量、主机 CPU/内存/磁盘）、用户 CRUD 与配额、强制结束会话、流量统计与 CSV 导出、审计日志、浏览数据占用查看与清理、系统配置 |
 | 审计与计量 | 登录成功/失败/锁定、会话创建/恢复/结束、管理员操作、配额触发；互联网流量按用户/会话/日 汇总 |
-| **/nowapi 节点查询** | 读本机 v2rayN 的本地库，返回**当前选中**的代理节点分享链接（`vless://…` 等），切节点即刻生效；默认纯文本，`?format=json` 取结构化信息；支持 9 种协议链接还原。另有**极简模式**把整站收敛成只回答这一个接口 |
+| **/nowapi 节点查询** | 读本机 v2rayN 的本地库，返回**当前选中**的代理节点分享链接（`vless://…` 等），切节点即刻生效；默认纯文本，`?format=json` 取结构化信息；支持 9 种协议链接还原；**`NOWAPI_TOKEN` 口令校验**（`?token=` 或 `X-Nowapi-Token`，常量时间比对）。另有**极简模式**把整站收敛成只回答这一个接口 |
 | 安全 | 短时一次性连接票据（默认 120s）代替会话 Token、后端强制校验会话所有权、CDP 只监听 127.0.0.1 随机端口、CSP / X-Frame-Options / nosniff、WebSocket 背压保护 |
 
 ## 2. 技术选型
@@ -205,13 +205,19 @@ ADMIN_INITIAL_PASSWORD= # 仅首次初始化生效
 不登录也能访问（一般给外部脚本 / 手机快捷指令轮询用），数据直接读 v2rayN 的本地库，
 所以在 v2rayN 里切换节点后**下一次请求就会变**，不需要重启本服务。
 
+> **访问需要口令。** 节点链接里含 UUID 和服务器地址，等于代理凭据，所以 `NOWAPI_TOKEN`
+> 一经设置就必须带上口令，否则一律 `403 403 forbidden：token 无效`。
+
 ```bash
 # 默认：一行分享链接，可直接订阅到别的客户端
-curl http://<host>:28471/nowapi
+curl "http://<host>:28471/nowapi?token=<your-token>"
 # vless://bfd...@us.sa.openel.top:51386?encryption=none&security=tls&...#[vless]美国优化
 
+# 口令也可以放请求头（URL 里带口令会进浏览器历史 / 代理日志，脚本里推荐这种）
+curl -H "X-Nowapi-Token: <your-token>" http://<host>:28471/nowapi
+
 # 结构化信息
-curl "http://<host>:28471/nowapi?format=json"
+curl "http://<host>:28471/nowapi?token=<your-token>&format=json"
 # {"ok":true,"protocol":"vless","name":"[vless]美国优化","address":"us.sa.openel.top",
 #  "port":51386,"network":"ws","security":"tls","link":"vless://...","updatedAt":"...","source":{...}}
 ```
@@ -227,7 +233,9 @@ curl "http://<host>:28471/nowapi?format=json"
 - 起不来的三种情况都有明确错误码：`v2rayn_not_found`（找不到目录，配 `V2RAYN_DIR`）、
   `no_selection`（v2rayN 里没选节点）、`db_read_failed`（文件被占用）。
 - 配置项：`V2RAYN_DIR` 指定 v2rayN 便携版根目录（留空自动探测常见落点）；
-  `NOWAPI_TOKEN` 设了口令后必须带 `?token=xxx` 或 `X-Nowapi-Token` 头，否则 403。
+  `NOWAPI_TOKEN` 是访问口令，设了之后必须带 `?token=xxx` 或 `X-Nowapi-Token` 头，否则 403。
+  口令比对走 `crypto.timingSafeEqual`（先比长度再定长比内容），不用 `===` 免遭时序侧信道。
+  改口令只需改 `.env` 后重启服务。
 
 #### 极简模式（只留这一个接口）
 
@@ -248,8 +256,10 @@ curl "http://<host>:28471/nowapi?format=json"
 - 远端浏览器被限制访问回环 / 内网 / 链路本地 / 云元数据地址，避免被当成内网跳板（`BLOCK_PRIVATE_NETWORK=1`）。
 - 不记录网页正文、表单内容、密码或 Cookie；不解密 HTTPS。
 - **`/nowapi` 会原文吐出代理节点链接，等价于公开代理凭据**（含 UUID、服务器地址、SNI）。
-  默认不校验口令是为了便于脚本调用；对外部署时请务必设置 `NOWAPI_TOKEN`，否则任何人都能拿走你的节点。
-  未设置时服务启动日志会打一条 WARN 提醒。
+  因此 `NOWAPI_TOKEN` 必须设置：本机已在 `.env` 里配置了随机口令，未带口令的请求一律 403；
+  只留空时才退化为无鉴权，此时服务启动日志会打一条 WARN 提醒。
+- 用 `?token=` 传口令时，URL 可能被浏览器历史、代理日志、Referer 记录；脚本调用建议改用
+  `X-Nowapi-Token` 请求头。响应带 `Cache-Control: no-store`，不会留在任何中间缓存里。
 
 > 注意：通过 frp 的 tcp 映射以 **纯 HTTP** 暴露时，登录口令在公网是明文传输的。要真正安全只有两条路：本机提供 TLS（自签会告警，需自有域名证书），或在 VPS 上用 Caddy/Nginx 做 HTTPS 反代。见 `docs/DEPLOY.md`。
 

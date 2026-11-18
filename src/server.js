@@ -232,8 +232,10 @@ server.listen(config.port, config.host, async () => {
   }
   // 可选：把 frpc 交给本服务托管（配置了 FRPC_CONFIG 才启用）
   startFrpc().catch((err) => logger.warn('启动 frpc 失败', err.message));
-  // /nowapi 会原文吐出当前节点链接，等于代理凭据；没设口令时明确提醒一句
-  if (!config.nowapiToken) {
+  // /nowapi 会原文吐出当前节点链接，等于代理凭据；口令状态要显式打出来，方便排查
+  if (config.nowapiToken) {
+    logger.info('/nowapi 访问口令已启用（?token=… 或请求头 X-Nowapi-Token），未带口令一律 403');
+  } else {
     logger.warn(
       `/nowapi 未设置 NOWAPI_TOKEN：任何能访问本服务的人都能取到当前代理节点（${config.publicUrl || `http://localhost:${config.port}`}/nowapi）`,
     );
