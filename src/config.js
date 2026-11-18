@@ -71,6 +71,30 @@ const num = (v, d) => {
   return Number.isFinite(n) ? n : d;
 };
 
+/**
+ * 极简模式（只开放 /nowapi）的判定顺序：
+ *   1) 环境变量 NOWAPI_ONLY —— 两个 .bat 启动器显式设置，优先级最高
+ *   2) data/autostart-mode.txt —— install-autostart.ps1 -Mode 写入，供开机自启使用
+ *   3) 都没有则视为完整平台
+ *
+ * 判定放在这里而不是守护脚本里，是为了让那个 vbs 保持纯 ASCII，
+ * 也不必去改 WSH 的进程环境（那套 API 行为不稳定且难以验证）。
+ */
+function resolveNowapiOnly() {
+  if (process.env.NOWAPI_ONLY !== undefined) return bool(process.env.NOWAPI_ONLY, false);
+  try {
+    const f = path.join(DATA_DIR, 'autostart-mode.txt');
+    if (fs.existsSync(f)) {
+      const v = fs.readFileSync(f, 'utf-8').trim().toLowerCase();
+      if (v === 'nowapi' || v === '1') return true;
+      if (v === 'full' || v === '0') return false;
+    }
+  } catch {
+    /* 文件读不到就按默认走 */
+  }
+  return false;
+}
+
 export const config = {
   root: ROOT,
   dataDir: DATA_DIR,
@@ -122,6 +146,12 @@ export const config = {
    */
   v2rayNDir: process.env.V2RAYN_DIR || '',
   nowapiToken: process.env.NOWAPI_TOKEN || '',
+  /**
+   * 极简模式：只开放 /nowapi，其余页面、接口、WebSocket 全部关闭，
+   * 启动时还会把上一轮遗留的远端浏览器进程清掉，之后不再接受任何会话。
+   * 开机自启与 frpc 托管不受影响 —— 这台机器就退化成一个只回答节点信息的接口。
+   */
+  nowapiOnly: resolveNowapiOnly(),
   sessionSecret: resolveSecret(),
   sessionTtlHours: num(process.env.SESSION_TTL_HOURS, 12),
   chromePath: detectChrome(),

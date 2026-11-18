@@ -4,6 +4,12 @@
 ' Behavior: exit code 0  -> treated as an intentional stop, guardian exits.
 '           non-zero     -> treated as a crash, restart with backoff
 '                           (5s,10s,20s,40s,60s cap), give up after 20 attempts.
+' Mode    : decided by the service itself, not here. Priority:
+'             1) NOWAPI_ONLY from the environment (set by the .bat launchers)
+'             2) data\autostart-mode.txt, written by install-autostart.ps1 -Mode
+'             3) default = full platform
+'           Keeping the decision in config.js means this file stays ANSI-safe and
+'           we never have to mutate the WSH process environment.
 ' Note    : comments are English on purpose - cscript reads this file as ANSI,
 '           so UTF-8 Chinese comments would be garbled and can break parsing.
 ' Stop    : do NOT just kill node.exe, the guardian would restart it.

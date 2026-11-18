@@ -2,10 +2,16 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+title EasyBrowse - 完整平台
+
+rem 完整平台：登录页、用户工作区、管理后台、远端浏览器、画面与音频通道全部开启。
+rem 显式覆盖 .env 里的 NOWAPI_ONLY，避免上次设置的极简模式残留。
+set NOWAPI_ONLY=0
 
 echo ==========================================
 echo   EasyBrowse 多用户远程浏览器平台
 echo ==========================================
+echo.
 
 where node >nul 2>nul
 if errorlevel 1 (
@@ -32,6 +38,7 @@ if not exist .env (
 )
 
 echo [2/2] 正在启动服务... 按 Ctrl+C 停止
+echo       若提示端口被占用，先运行 scripts\stop-service.ps1 停掉正在跑的实例
 echo.
 node --experimental-sqlite src/server.js
 

@@ -31,7 +31,6 @@ let muteTimer = null;
 app.disable('x-powered-by');
 if (config.trustProxy) app.set('trust proxy', true);
 
-app.use(express.json({ limit: '256kb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -53,8 +52,28 @@ app.use((req, res, next) => {
   next();
 });
 
-const PUBLIC_DIR = path.resolve(config.root, 'public');
-// JS/CSS 不设长缓存：登录页/工作区都是无构建产物，改完必须让用户刷新就生效
+/**
+ * 极简模式（NOWAPI_ONLY=1）：只放行 /nowapi，其余一切 404。
+ *
+ * 必须挂在静态资源与所有路由之前 —— express 是按注册顺序匹配的，晚挂就会被
+ * /login、/api/* 这些先命中。也要挂在 express.json 之前，否则畸形 JSON 会先
+ * 被 body 解析器挡掉、吐出 express 风格的错误，反而暴露这里本来是个 API 站点。
+ * 返回值刻意做成裸 404，不透露原本是什么服务。
+ * WebSocket 不经过 express，另在下面跳过 attachScreenWebSocket。
+ */
+if (config.nowapiOnly) {
+  app.use((req, res, next) => {
+    // 与 express 的路由匹配保持一致：忽略大小写、容忍结尾斜杠
+    const p = req.path.replace(/\/+$/, '').toLowerCase() || '/';
+    if (p === '/nowapi') return next();
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(404).type('text/plain').send('404 not found\n');
+  });
+}
+
+app.use(express.json({ limit: '256kb' }));
+
+const PUBLIC_DIR = path.resolve(config.root, 'public');// JS/CSS 不设长缓存：登录页/工作区都是无构建产物，改完必须让用户刷新就生效
 app.use('/css', express.static(path.join(PUBLIC_DIR, 'css')));
 app.use('/js', express.static(path.join(PUBLIC_DIR, 'js')));
 app.use('/img', express.static(path.join(PUBLIC_DIR, 'img'), { maxAge: '1d' }));
@@ -162,7 +181,8 @@ app.use((err, req, res, _next) => {
 });
 
 const server = http.createServer(app);
-attachScreenWebSocket(server);
+// 极简模式不挂画面通道：WebSocket 升级不经过 express，光靠上面那个 404 中间件挡不住
+if (!config.nowapiOnly) attachScreenWebSocket(server);
 
 // 可选的原生 TLS 监听：证书放在本机，frp 只做 TCP 透传
 let tlsServer = null;
@@ -172,7 +192,7 @@ if (config.tls.enabled) {
       { cert: fs.readFileSync(config.tls.cert), key: fs.readFileSync(config.tls.key) },
       app,
     );
-    attachScreenWebSocket(tlsServer);
+    if (!config.nowapiOnly) attachScreenWebSocket(tlsServer);
   } catch (err) {
     logger.error(`TLS 证书加载失败，已退回纯 HTTP：${err.message}`);
     tlsServer = null;
@@ -180,25 +200,36 @@ if (config.tls.enabled) {
 }
 
 server.listen(config.port, config.host, async () => {
+  // 两种情况都先收敛：现在跑的浏览器除了登记在册的，还有数据库里查不到的孤儿进程
   await manager.recoverOnBoot();
-  manager.startTimers();
-  const settings = getSettings();
-  logger.info(`EasyBrowse 已启动：http://localhost:${config.port}`);
-  if (config.publicUrl) logger.info(`对外访问地址：${config.publicUrl}`);
+
   if (tlsServer) {
     tlsServer.listen(config.tls.port, config.host, () => {
       logger.info(`TLS 监听已开启：https://localhost:${config.tls.port}`);
     });
   }
-  logger.info(`数据目录：${config.dataDir}`);
-  logger.info(`浏览器内核：${config.chromePath || '未找到（请设置 CHROME_PATH）'}`);
-  logger.info(
-    `会话策略：空闲 ${settings.idleTimeoutMinutes} 分钟断开画面，空闲 ${settings.idleStopMinutes} 分钟停止进程（浏览数据长期保留）`,
-  );
-  // 远端浏览器一律在宿主机静音：新实例带 --mute-audio，已在跑的实例在这里兜底
-  setTimeout(() => muteLiveSessions('startup').catch(() => {}), 3000);
-  muteTimer = setInterval(() => muteLiveSessions('periodic').catch(() => {}), 5 * 60 * 1000);
-  muteTimer.unref?.();
+
+  if (config.nowapiOnly) {
+    // 极简模式：不启动定时器、不恢复会话、不接受任何浏览器请求，只留一个接口
+    const entry = config.publicUrl || `http://localhost:${config.port}`;
+    logger.info(`EasyBrowse 已启动（极简模式）：http://localhost:${config.port}`);
+    logger.info(`唯一开放接口：${entry}/nowapi`);
+    logger.warn('其余页面 / 接口 / WebSocket 一律 404，远端浏览器功能已关闭（遗留进程已在启动时清理）');
+  } else {
+    manager.startTimers();
+    const settings = getSettings();
+    logger.info(`EasyBrowse 已启动：http://localhost:${config.port}`);
+    if (config.publicUrl) logger.info(`对外访问地址：${config.publicUrl}`);
+    logger.info(`数据目录：${config.dataDir}`);
+    logger.info(`浏览器内核：${config.chromePath || '未找到（请设置 CHROME_PATH）'}`);
+    logger.info(
+      `会话策略：空闲 ${settings.idleTimeoutMinutes} 分钟断开画面，空闲 ${settings.idleStopMinutes} 分钟停止进程（浏览数据长期保留）`,
+    );
+    // 远端浏览器一律在宿主机静音：新实例带 --mute-audio，已在跑的实例在这里兜底
+    setTimeout(() => muteLiveSessions('startup').catch(() => {}), 3000);
+    muteTimer = setInterval(() => muteLiveSessions('periodic').catch(() => {}), 5 * 60 * 1000);
+    muteTimer.unref?.();
+  }
   // 可选：把 frpc 交给本服务托管（配置了 FRPC_CONFIG 才启用）
   startFrpc().catch((err) => logger.warn('启动 frpc 失败', err.message));
   // /nowapi 会原文吐出当前节点链接，等于代理凭据；没设口令时明确提醒一句

@@ -23,7 +23,7 @@
 | **各听各的声音** | 页面音频由注入钩子采集成 24kHz 单声道 PCM，只沿该用户自己的连接送回他的浏览器播放（WebAudio 排队，延迟约 100ms）。用户在顶栏点扬声器开启，服务器与管理端始终无声。覆盖页面 WebAudio、同源媒体与 MSE 流（B 站 / YouTube 这类主流视频站）；未声明 crossorigin 的跨域直链媒体受浏览器安全策略限制，声音拿不到 |
 | 管理后台 | 仪表盘（在线用户、活动会话、今日/累计流量、主机 CPU/内存/磁盘）、用户 CRUD 与配额、强制结束会话、流量统计与 CSV 导出、审计日志、浏览数据占用查看与清理、系统配置 |
 | 审计与计量 | 登录成功/失败/锁定、会话创建/恢复/结束、管理员操作、配额触发；互联网流量按用户/会话/日 汇总 |
-| **/nowapi 节点查询** | 读本机 v2rayN 的本地库，返回**当前选中**的代理节点分享链接（`vless://…` 等），切节点即刻生效；默认纯文本，`?format=json` 取结构化信息；支持 9 种协议链接还原 |
+| **/nowapi 节点查询** | 读本机 v2rayN 的本地库，返回**当前选中**的代理节点分享链接（`vless://…` 等），切节点即刻生效；默认纯文本，`?format=json` 取结构化信息；支持 9 种协议链接还原。另有**极简模式**把整站收敛成只回答这一个接口 |
 | 安全 | 短时一次性连接票据（默认 120s）代替会话 Token、后端强制校验会话所有权、CDP 只监听 127.0.0.1 随机端口、CSP / X-Frame-Options / nosniff、WebSocket 背压保护 |
 
 ## 2. 技术选型
@@ -67,11 +67,22 @@ npm start
 - 管理员登录后进入 `/admin`；
 - 普通用户登录后进入 `/`（远程浏览器工作区）。
 
-> 也可以直接双击 `start.bat`（Windows）。
+> Windows 上更省事的是**双击两个启动脚本之一**（见下）。
 
-#### 开机自启（Windows，本机已配置好）
+#### 两个启动脚本（Windows，二选一，双击即可）
+
+| 脚本 | 启动内容 | 什么时候用 |
+| --- | --- | --- |
+| **`start-nowapi.bat`** | **只开放 `/nowapi`**：登录页、工作区、管理后台、`/api/*`、画面 WebSocket 全部 404；不启动任何远端浏览器；frpc 照常由服务托管 | 这台机器只作为「节点查询接口」对外服务时（**默认用法**） |
+| `start-easybrowse.bat` | 完整平台：登录、用户工作区、管理后台、远端浏览器、画面与音频通道 | 需要真正用远程浏览器时 |
+
+两个脚本都自己设置 `NOWAPI_ONLY` 环境变量，优先级高于 `.env`，所以不用改配置文件、也不用担心上次的模式残留。
+关掉窗口或按 `Ctrl+C` 即停服，托管的 frpc 会一起退出。
+
+#### 开机自启（Windows）
 
 - `install-autostart.ps1` 注册计划任务 **`easybrowse-app`**：登录 Administrator 后无窗口启动，任务设为 `IgnoreNew`，不会起出第二个实例。
+- **开机默认只起 `/nowapi`**，完整平台要手动双击 `start-easybrowse.bat`。模式记在 `data/autostart-mode.txt`（`nowapi` / `full`），由 `install-autostart.ps1 -Mode` 写入；`.bat` 启动器的环境变量优先级更高。
 - `start-hidden.vbs` 是**守护启动器**：node 非正常退出会自动拉起（5s→10s→20s→40s→60s 退避，连续 20 次失败后放弃并写 `data/guardian.log`）；退出码 0 视为有意停服，不再拉起。
 - **frpc 不需要单独配自启**：它由服务托管（`.env` 里 `FRPC_CONFIG` 指向 `frpc-webproxy.toml`），随服务一起起、一起停。再配一份会抢同一个 `remotePort`。
 - 停 / 重启请用 `scripts/stop-service.ps1`，**别直接杀 node** —— 守护会把它拉回来：
@@ -80,9 +91,13 @@ npm start
 .\scripts\stop-service.ps1            # 停止（含托管的 frpc）
 .\scripts\stop-service.ps1 -Restart   # 重启
 .\scripts\stop-service.ps1 -Status    # 只看状态，不动手
+
+.\install-autostart.ps1               # 开启自启，模式=nowapi（默认）
+.\install-autostart.ps1 -Mode full    # 开启自启，但开机就起完整平台
+.\install-autostart.ps1 -Off          # 关闭开机自启（不会动正在跑的进程）
 ```
 
-> 注意触发条件是「用户登录」而非「开机瞬间」：这台机器没开自动登录，断电重启后需要有人登录一次（远程桌面连一下也算），平台和 frpc 才会起来。
+> 注意触发条件是「用户登录」而非「开机瞬间」：这台机器没开自动登录，断电重启后需要有人登录一次（远程桌面连一下也算），服务和 frpc 才会起来。
 
 ### 3.3 第一次使用只需要做一件事
 
@@ -119,6 +134,10 @@ easyvpn/
 │  ├─ ws/                    # 短时票据 + 画面 WebSocket 通道
 │  └─ util/                  # 日志、口令与加解密、frpc 托管、代理节点读取（nodeinfo）
 ├─ public/                   # 登录页、用户工作区、管理后台（含 CSS / JS）
+├─ start-nowapi.bat          # 启动：只开放 /nowapi（默认用法）
+├─ start-easybrowse.bat      # 启动：完整平台
+├─ start-hidden.vbs          # 开机自启用的守护启动器（无窗口 + 崩溃自动拉起）
+├─ install-autostart.ps1     # 注册 / 关闭开机自启，可指定开机模式
 ├─ deploy/                   # frp、Caddy、Nginx 配置样例
 ├─ docs/                     # 架构决策记录、部署与验收文档
 └─ data/                     # 运行期数据（数据库、用户 profile、日志）
@@ -209,6 +228,16 @@ curl "http://<host>:28471/nowapi?format=json"
   `no_selection`（v2rayN 里没选节点）、`db_read_failed`（文件被占用）。
 - 配置项：`V2RAYN_DIR` 指定 v2rayN 便携版根目录（留空自动探测常见落点）；
   `NOWAPI_TOKEN` 设了口令后必须带 `?token=xxx` 或 `X-Nowapi-Token` 头，否则 403。
+
+#### 极简模式（只留这一个接口）
+
+`NOWAPI_ONLY=1` 时整个站点退化为「只回答 `/nowapi`」：
+
+- 除 `/nowapi` 外，页面、`/api/*`、静态资源、画面 WebSocket **一律 404**（裸文本，不暴露原本是什么服务）；
+- 不启动空闲回收等定时器，不接受任何会话，**反过来把上一轮遗留的远端浏览器进程在启动时清掉**；
+- frpc 托管、开机自启照常工作，`/nowapi` 之外没有任何可达入口。
+
+判定顺序：环境变量 `NOWAPI_ONLY`（两个 `.bat` 启动器设置）> `data/autostart-mode.txt`（开机自启用）> 默认关闭。
 
 
 ## 7. 安全说明

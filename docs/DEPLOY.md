@@ -36,7 +36,7 @@ npm install
 npm start
 ```
 
-或双击 `start.bat`。控制台应打印：
+或双击 `start-easybrowse.bat`（完整平台）/ `start-nowapi.bat`（只开放 `/nowapi`）。控制台应打印：
 
 ```
 EasyBrowse 已启动：http://localhost:28471
@@ -55,13 +55,29 @@ CHROME_PROXY=
 PUBLIC_URL=http://zjc.rainplay.cn:25578
 ```
 
+### 启动方式
+
+两个脚本二选一，双击即可（都自己设 `NOWAPI_ONLY`，优先级高于 `.env`）：
+
+| 脚本 | 效果 |
+| --- | --- |
+| `start-nowapi.bat` | **只开放 `/nowapi`**，其余页面 / 接口 / WebSocket 一律 404，不启动远端浏览器（默认用法） |
+| `start-easybrowse.bat` | 完整平台：登录、工作区、管理后台、远端浏览器 |
+
 ### 开机自启
 
 已内置脚本：右键「使用 PowerShell 运行」`install-autostart.ps1`。它注册计划任务 `easybrowse-app`，登录 Windows 后以隐藏窗口启动服务，异常退出 1 分钟后自动重试。
 
+```powershell
+.\install-autostart.ps1               # 开启，开机模式 = nowapi（只起接口）
+.\install-autostart.ps1 -Mode full    # 开启，开机模式 = 完整平台
+.\install-autostart.ps1 -Off          # 关闭开机自启（不动正在跑的进程）
+```
+
+- **开机模式记在 `data\autostart-mode.txt`**（`nowapi` / `full`），由服务在启动时读取（`src/config.js` 的 `resolveNowapiOnly()`）。这样守护脚本里不用改 WSH 进程环境，保持纯 ASCII；
 - 隐藏启动由 `start-hidden.vbs` 完成，Node 绝对路径写在里面（当前 `D:\Ccode\NODE\node-v24.12.0-win-x64\node.exe`），换机器只改这一行；
 - 查看状态：`Get-ScheduledTask easybrowse-app | Get-ScheduledTaskInfo`；
-- 服务日志：`data\server.log`。
+- 服务日志：`data\server.log`，守护日志：`data\guardian.log`。
 
 ## 4. 配置 frp
 
