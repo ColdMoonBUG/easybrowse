@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <title>我的浏览器 · EasyBrowse</title>
+    <link rel="icon" href="/img/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/css/base.css" />
+    <link rel="stylesheet" href="/css/app.css?v=input-fix1" />
+  </head>
+  <body>
+    <div class="ws is-immersive" id="ws">
+      <!-- 顶部控制区（顶栏 + 工具栏 + 标签条）：沉浸模式下整体上滑收起，让画面占满窗口 -->
+      <div class="ws-chrome" id="chrome">
+      <header class="ws-top">
+        <div class="ws-brand">
+          <span class="brand-mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3.6 9h16.8M3.6 15h16.8" />
+              <path d="M12 3c2.4 2.6 3.6 5.6 3.6 9s-1.2 6.4-3.6 9c-2.4-2.6-3.6-5.6-3.6-9S9.6 5.6 12 3z" />
+            </svg>
+          </span>
+          <span class="name" id="brandName">EasyBrowse</span>
+          <span class="env" id="sessionMode">独立隔离会话</span>
+        </div>
+        <div class="ws-top-right">
+          <span class="status-pill" id="statusPill" data-state="idle"><span class="dot"></span><span id="statusText">未启动</span></span>
+          <!-- 实时网络：本机到服务器的延迟 + 画面码率 -->
+          <div class="netmeter" id="netmeter" title="本机 ↔ 服务器：实时延迟 / 画面码率">
+            <span class="nm nm-ping" id="nmPing" data-q="idle">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12h4l2-6 3.5 12 2.5-6h8" />
+              </svg>
+              <span class="nm-val" id="nmPingVal">--</span>
+            </span>
+            <span class="nm nm-rate" id="nmRate">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 19V6M6 12l6-6 6 6" />
+              </svg>
+              <span class="nm-val" id="nmRateVal">--</span>
+            </span>
+          </div>
+          <div class="who">
+            <span class="avatar" id="avatar">U</span>
+            <span class="uname" id="uname">用户</span>
+          </div>
+          <button class="icon-btn" id="btnLogout" title="退出登录">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 17l5-5-5-5M20 12H9M12 4H6a2 2 0 00-2 2v12a2 2 0 002 2h6" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="ws-toolbar">
+        <div class="tool-group">
+          <button class="icon-btn" id="btnBack" title="后退">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+          </button>
+          <button class="icon-btn" id="btnForward" title="前进">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+          <button class="icon-btn" id="btnReload" title="刷新">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 11-2.6-6.4M21 4v5h-5" />
+            </svg>
+          </button>
+        </div>
+        <span class="tool-sep"></span>
+        <form class="addr" id="addrForm" autocomplete="off">
+          <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="5" y="10" width="14" height="10" rx="2.5" />
+            <path d="M8 10V7a4 4 0 018 0v3" />
+          </svg>
+          <input id="addrInput" placeholder="输入网址或搜索内容，回车访问" spellcheck="false" autocapitalize="off" autocorrect="off" />
+          <button class="go" type="submit" title="访问">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </button>
+        </form>
+        <div class="tool-group">
+          <button class="icon-btn" id="btnAudio" title="声音：关闭（点击开启远端页面声音）">
+            <svg class="ico-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 5L6 9H3v6h3l5 4z" />
+              <path d="M16 9l5 6M21 9l-5 6" />
+            </svg>
+            <svg class="ico-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 5L6 9H3v6h3l5 4z" />
+              <path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13" />
+            </svg>
+          </button>
+          <button class="icon-btn q-btn" id="btnQuality" title="画质：高清 / 均衡 / 省流">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3l2.2 5.1 5.6.5-4.2 3.7 1.2 5.5L12 15l-4.8 2.8 1.2-5.5-4.2-3.7 5.6-.5z" />
+            </svg>
+            <span class="q-label" id="qLabel">高清</span>
+          </button>
+          <button class="icon-btn" id="btnKeyboard" title="输入文字 / 粘贴">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2.5" y="6" width="19" height="12" rx="2.5" />
+              <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+            </svg>
+          </button>
+          <button class="icon-btn hide-sm" id="btnFullscreen" title="全屏">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M21 16v3a2 2 0 01-2 2h-3M8 21H5a2 2 0 01-2-2v-3" />
+            </svg>
+          </button>
+          <button class="icon-btn" id="btnMore" title="更多">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>
+          </button>
+        </div>
+        <div class="menu qmenu hidden" id="qualityMenu">
+          <div class="menu-title">画质</div>
+          <button data-level="high" class="qopt">
+            <span class="qcheck">✓</span><span class="qname">高清</span><span class="qhint">原画</span>
+          </button>
+          <button data-level="medium" class="qopt">
+            <span class="qcheck">✓</span><span class="qname">均衡</span><span class="qhint">推荐</span>
+          </button>
+          <button data-level="low" class="qopt">
+            <span class="qcheck">✓</span><span class="qname">省流</span><span class="qhint">弱网</span>
+          </button>
+        </div>
+        <div class="menu hidden" id="moreMenu">
+          <button data-act="usage">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 5-6" /></svg>
+            我的用量
+          </button>
+          <button data-act="paste">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4" rx="1.5" /><path d="M16 5h2a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h2" /></svg>
+            粘贴文字到页面
+          </button>
+          <button data-act="chrome">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16" /><path d="M9 6l3-3 3 3" /></svg>
+            收起 / 展开控制栏
+          </button>
+          <button data-act="fullscreen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M21 16v3a2 2 0 01-2 2h-3M8 21H5a2 2 0 01-2-2v-3" /></svg>
+            切换全屏
+          </button>
+          <div class="divider"></div>
+          <div class="menu-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 5L6 9H3v6h3l5 4z" /><path d="M17 9l4 6M21 9l-4 6" />
+            </svg>
+            <span>声音只送回你自己的耳机，服务器端保持静音，其他人听不到</span>
+          </div>
+          <button data-act="end" class="danger">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+            结束本次会话
+          </button>
+        </div>
+      </div>
+
+      <div class="tabstrip" id="tabstrip"></div>
+      </div>
+
+      <!-- 顶部感应区：鼠标贴到窗口最上沿时把控制栏拉下来 -->
+      <div class="chrome-sensor" id="chromeSensor" aria-hidden="true"></div>
+
+      <main class="ws-stage" id="stage">
+        <canvas id="screen" class="hidden"></canvas>
+
+        <div class="ws-overlay" id="overlay">
+          <div class="overlay-card" id="overlayCard"></div>
+        </div>
+      </main>
+
+      <footer class="ws-status">
+        <span id="stSession">会话 —</span>
+        <span class="sep">|</span>
+        <span id="stViewport">—</span>
+        <span class="sep">|</span>
+        <span id="stProxy">出口 —</span>
+        <span class="gap"></span>
+        <span id="stTraffic">流量 0 B</span>
+      </footer>
+    </div>
+
+    <div id="toast"></div>
+    <script>
+      // 手机端控制栏常显：首帧就把沉浸态去掉，避免闪一下再展开
+      if (window.matchMedia('(hover: none)').matches) document.getElementById('ws').classList.remove('is-immersive');
+    </script>
+    <script type="module" src="/js/app.js?v=input-fix1"></script>
+  </body>
+</html>

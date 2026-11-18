@@ -1,0 +1,23 @@
+# FRP 服务端（公网服务器）配置示例
+# frps -c frps.toml
+
+bindPort = 7000
+kcpBindPort = 7000
+
+# 务必使用长随机串，不要用默认值
+auth.method = "token"
+auth.token = "请替换为至少 32 位的随机字符串"
+
+# Dashboard 只监听回环，绝不暴露公网
+webServer.addr = "127.0.0.1"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "请替换为强密码"
+
+# 限制客户端连接速率，缓解暴力破解
+transport.maxPoolCount = 8
+transport.tcpMux = true
+
+log.to = "console"
+log.level = "info"
+log.maxDays = 7

@@ -1,0 +1,26 @@
+# FRP 客户端（跑 EasyBrowse 的这台 Windows）配置示例
+# frpc -c frpc.toml
+
+serverAddr = "frp 服务商提供的域名或 IP"
+serverPort = 52292
+
+auth.method = "token"
+auth.token = "与 frps 侧一致的 token"
+
+# 内网 28471 映射到公网 remotePort，访客用 http://serverAddr:remotePort 访问
+[[proxies]]
+name = "easybrowse"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 28471
+# 注意：remotePort 填服务商面板的「内网端口」，公网访问地址看「映射公网地址」列
+# 本机实测：25575 -> zjc.rainplay.cn:25578
+remotePort = 25575
+
+# 若想用本机 TLS（https 直连），再加一条指向 TLS_PORT 的映射：
+# [[proxies]]
+# name = "easybrowse-tls"
+# type = "tcp"
+# localIP = "127.0.0.1"
+# localPort = 28472
+# remotePort = 25576

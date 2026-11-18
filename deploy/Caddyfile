@@ -1,0 +1,29 @@
+# Caddy 反向代理示例：自动 HTTPS + WebSocket 转发
+# 部署在 frps 所在 VPS 上时，把 127.0.0.1:28471 换成 127.0.0.1:<frp 隧道映射到本机的端口>
+# 部署在 frps 所在 VPS 上时，把 127.0.0.1:28471 换成 127.0.0.1:<frp 隧道映射到本机的端口>
+# 用法：caddy run --config Caddyfile
+
+browse.example.com {
+	encode gzip
+
+	# 画面走 WebSocket，必须保证 Upgrade 被转发
+	reverse_proxy 127.0.0.1:28471 {
+		header_up Host {host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		transport http {
+			read_timeout 1h
+			write_timeout 1h
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file C:\logs\easybrowse-caddy.log
+		format json
+	}
+}

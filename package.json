@@ -1,0 +1,23 @@
+{
+  "name": "easybrowse",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EasyBrowse 多用户远程浏览器平台（Remote Browser Isolation / Browser-as-a-Service）",
+  "type": "module",
+  "main": "src/server.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "start": "node --experimental-sqlite src/server.js",
+    "dev": "node --experimental-sqlite --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "express": "^4.22.3",
+    "ws": "^8.23.0"
+  },
+  "license": "ISC"
+}

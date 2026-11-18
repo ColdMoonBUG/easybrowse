@@ -1,0 +1,15 @@
+# 仓库内统一存 LF，检查出时按平台转换
+* text=auto
+
+# Windows 脚本保持 CRLF（.vbs 由 cscript 按 ANSI 读取，换行必须标准）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+
+*.sh  text eol=lf
+
+# 二进制资源不做转换
+*.png binary
+*.jpg binary
+*.ico binary
