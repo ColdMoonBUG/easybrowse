@@ -2,29 +2,37 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title EasyBrowse - 完整平台
+title EasyBrowse - full platform
 
-rem 完整平台：登录页、用户工作区、管理后台、远端浏览器、画面与音频通道全部开启。
-rem 显式覆盖 .env 里的 NOWAPI_ONLY，避免上次设置的极简模式残留。
+rem ============================================================
+rem  Full platform: login, workspace, admin console, remote browser,
+rem  screen and audio channels. Overrides NOWAPI_ONLY so a previous
+rem  light-mode setting never leaks in.
+rem
+rem  KEEP THIS FILE ASCII-ONLY. Under chcp 65001 cmd.exe mis-parses
+rem  consecutive multi-byte lines in a batch file and drops them
+rem  (reproduced: the 3rd Chinese echo line vanished and cmd tried
+rem  to execute a fragment). English here, UTF-8 in Node's own log.
+rem ============================================================
 set NOWAPI_ONLY=0
 
 echo ==========================================
-echo   EasyBrowse 多用户远程浏览器平台
+echo   EasyBrowse - full platform
 echo ==========================================
 echo.
 
 where node >nul 2>nul
 if errorlevel 1 (
-  echo [错误] 未找到 Node.js，请先安装 Node.js 22 或更高版本。
+  echo [ERROR] Node.js not found. Install Node.js 22 or newer first.
   pause
   exit /b 1
 )
 
 if not exist node_modules (
-  echo [1/2] 首次运行，正在安装依赖...
+  echo [1/2] First run, installing dependencies...
   call npm install
   if errorlevel 1 (
-    echo [错误] 依赖安装失败，请检查网络或 npm 镜像设置。
+    echo [ERROR] npm install failed. Check network or npm registry.
     pause
     exit /b 1
   )
@@ -33,15 +41,16 @@ if not exist node_modules (
 if not exist .env (
   if exist .env.example (
     copy .env.example .env >nul
-    echo [提示] 已根据 .env.example 生成 .env，可按需修改端口与浏览器路径。
+    echo [INFO] Created .env from .env.example
   )
 )
 
-echo [2/2] 正在启动服务... 按 Ctrl+C 停止
-echo       若提示端口被占用，先运行 scripts\stop-service.ps1 停掉正在跑的实例
+echo [2/2] Starting the full platform...
+echo       Press Ctrl+C to stop
+echo       Port already in use? run scripts\stop-service.ps1 first
 echo.
 node --experimental-sqlite src/server.js
 
 echo.
-echo 服务已退出。
+echo Service exited.
 pause

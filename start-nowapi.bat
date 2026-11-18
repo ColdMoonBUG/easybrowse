@@ -2,29 +2,37 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title EasyBrowse - 仅 /nowapi
+title EasyBrowse - nowapi only
 
-rem 极简模式：只开放 /nowapi，页面 / 接口 / WebSocket 全部 404，远端浏览器不启动。
-rem 这里显式设环境变量，优先级高于 .env，所以不用改配置文件。
+rem ============================================================
+rem  Light mode: only /nowapi is served. Pages, APIs, static files
+rem  and the screen WebSocket all return 404. No remote browser.
+rem  The variable below overrides .env, no config edit needed.
+rem
+rem  KEEP THIS FILE ASCII-ONLY. Under chcp 65001 cmd.exe mis-parses
+rem  consecutive multi-byte lines in a batch file and drops them
+rem  (reproduced: the 3rd Chinese echo line vanished and cmd tried
+rem  to execute a fragment). English here, UTF-8 in Node's own log.
+rem ============================================================
 set NOWAPI_ONLY=1
 
 echo ==========================================
-echo   EasyBrowse - 极简模式（只开放 /nowapi）
+echo   EasyBrowse - nowapi only mode
 echo ==========================================
 echo.
 
 where node >nul 2>nul
 if errorlevel 1 (
-  echo [错误] 未找到 Node.js，请先安装 Node.js 22 或更高版本。
+  echo [ERROR] Node.js not found. Install Node.js 22 or newer first.
   pause
   exit /b 1
 )
 
 if not exist node_modules (
-  echo [1/2] 首次运行，正在安装依赖...
+  echo [1/2] First run, installing dependencies...
   call npm install
   if errorlevel 1 (
-    echo [错误] 依赖安装失败，请检查网络或 npm 镜像设置。
+    echo [ERROR] npm install failed. Check network or npm registry.
     pause
     exit /b 1
   )
@@ -33,17 +41,17 @@ if not exist node_modules (
 if not exist .env (
   if exist .env.example (
     copy .env.example .env >nul
-    echo [提示] 已根据 .env.example 生成 .env，可按需修改端口与代理路径。
+    echo [INFO] Created .env from .env.example
   )
 )
 
-echo [2/2] 启动中：只响应 /nowapi，其余路径一律 404
-echo       远端浏览器功能已关闭；frpc 由服务托管，随本窗口一起退出
-echo       按 Ctrl+C 停止
-echo       若提示端口被占用，先运行 scripts\stop-service.ps1 停掉正在跑的实例
+echo [2/2] Starting: only /nowapi is served, everything else 404
+echo       Remote browser feature is off; frpc is managed by the service
+echo       Press Ctrl+C to stop
+echo       Port already in use? run scripts\stop-service.ps1 first
 echo.
 node --experimental-sqlite src/server.js
 
 echo.
-echo 服务已退出。
+echo Service exited.
 pause
