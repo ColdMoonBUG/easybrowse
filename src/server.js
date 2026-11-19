@@ -29,7 +29,8 @@ seed();
 const app = express();
 let muteTimer = null;
 app.disable('x-powered-by');
-if (config.trustProxy) app.set('trust proxy', true);
+// 传具体跳数而不是 true：true 等于采信任意 X-Forwarded-For，可被伪造（见 config.trustProxy）
+if (config.trustProxy) app.set('trust proxy', config.trustProxy);
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -53,7 +54,22 @@ app.use((req, res, next) => {
 });
 
 /**
- * 极简模式（NOWAPI_ONLY=1）：只放行 /nowapi，其余一切 404。
+ * 极简模式放行的接口清单（除 /nowapi 之外）。
+ *
+ * 认证接口是纯 JSON API、不依赖任何前端页面，所以一并放行；其余页面、静态资源、
+ * 会话接口、画面 WebSocket 仍然全 404。用白名单而不是前缀匹配 —— 前缀匹配会把
+ * 以后新增的 /api/auth/xxx 偷偷放出去。
+ */
+const NOWAPI_EXTRA_PATHS = new Set([
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/logout',
+  '/api/auth/me',
+  '/api/auth/password',
+]);
+
+/**
+ * 极简模式（NOWAPI_ONLY=1）：只放行 /nowapi 与上表的认证接口，其余一切 404。
  *
  * 必须挂在静态资源与所有路由之前 —— express 是按注册顺序匹配的，晚挂就会被
  * /login、/api/* 这些先命中。也要挂在 express.json 之前，否则畸形 JSON 会先
@@ -65,7 +81,7 @@ if (config.nowapiOnly) {
   app.use((req, res, next) => {
     // 与 express 的路由匹配保持一致：忽略大小写、容忍结尾斜杠
     const p = req.path.replace(/\/+$/, '').toLowerCase() || '/';
-    if (p === '/nowapi') return next();
+    if (p === '/nowapi' || NOWAPI_EXTRA_PATHS.has(p)) return next();
     res.setHeader('Cache-Control', 'no-store');
     return res.status(404).type('text/plain').send('404 not found\n');
   });
@@ -210,10 +226,10 @@ server.listen(config.port, config.host, async () => {
   }
 
   if (config.nowapiOnly) {
-    // 极简模式：不启动定时器、不恢复会话、不接受任何浏览器请求，只留一个接口
+    // 极简模式：不启动定时器、不恢复会话、不接受任何浏览器请求，只留 /nowapi 与认证接口
     const entry = config.publicUrl || `http://localhost:${config.port}`;
     logger.info(`EasyBrowse 已启动（极简模式）：http://localhost:${config.port}`);
-    logger.info(`唯一开放接口：${entry}/nowapi`);
+    logger.info(`开放接口：${entry}/nowapi   |   ${entry}/api/auth/{login,register,me,logout,password}`);
     logger.warn('其余页面 / 接口 / WebSocket 一律 404，远端浏览器功能已关闭（遗留进程已在启动时清理）');
   } else {
     manager.startTimers();

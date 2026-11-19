@@ -13,10 +13,16 @@ export const COOKIE_NAME = 'eb_sid';
 
 const loginAttempts = new Map(); // key -> { count, lockedUntil }
 
+/**
+ * 取客户端 IP。
+ *
+ * 只用 Express 解析过的 req.ip（受 TRUST_PROXY 控制），不再自己读 X-Forwarded-For。
+ * 原因：frp 的 tcp 映射是纯 TCP 透传，不会写这个头，客户端自己填的值全是伪造的——
+ * 拿它做注册限流或登录锁定，攻击者每次换个假 IP 就绕过去了。
+ * 经 Caddy/Nginx 反代时把 TRUST_PROXY 设为 1，Express 会按信任链还原真实 IP。
+ */
 function clientIp(req) {
-  const raw = req.headers['x-forwarded-for'];
-  const first = Array.isArray(raw) ? raw[0] : String(raw || '').split(',')[0].trim();
-  return first || req.ip || req.socket?.remoteAddress || '';
+  return req.ip || req.socket?.remoteAddress || '';
 }
 
 export { clientIp };
@@ -74,8 +80,22 @@ export function destroyAuthSession(token) {
   query.run('DELETE FROM auth_sessions WHERE token = ?', token);
 }
 
+/**
+ * 从请求里取出登录态令牌。
+ *
+ * 优先 Cookie（浏览器走这条），其次 Authorization: Bearer（脚本 / 第三方系统走这条）。
+ * 两者指向同一张 auth_sessions 表，所以退出登录时任何一个都能让另一边同时失效。
+ */
+export function readToken(req) {
+  const fromCookie = parseCookies(req.headers.cookie || '')[COOKIE_NAME];
+  if (fromCookie) return fromCookie;
+  const auth = String(req.headers.authorization || '');
+  const m = /^Bearer\s+(.+)$/i.exec(auth);
+  return m ? m[1].trim() : '';
+}
+
 export function userByToken(req) {
-  const token = parseCookies(req.headers.cookie || '')[COOKIE_NAME];
+  const token = readToken(req);
   if (!token) return null;
   const row = query.get(
     `SELECT u.*, s.token AS sid, s.expires_at AS sid_expires

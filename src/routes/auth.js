@@ -8,10 +8,9 @@ import {
   createAuthSession,
   destroyAuthSession,
   login,
-  parseCookies,
+  readToken,
   requireAuth,
   setSessionCookie,
-  COOKIE_NAME,
 } from '../auth.js';
 import { config } from '../config.js';
 import { hashPassword, passwordStrengthError, verifyPassword } from '../util/crypto.js';
@@ -42,7 +41,14 @@ authRouter.post('/login', (req, res) => {
 
   const { token } = createAuthSession(result.user.id, req);
   setSessionCookie(res, token, config.sessionTtlHours);
-  return res.json({ user: publicUser(result.user), redirect: result.user.role === 'admin' ? '/admin' : '/' });
+  return res.json({
+    user: publicUser(result.user),
+    // 同一份令牌既能走 Cookie（浏览器），也能走 Authorization: Bearer（脚本）
+    token,
+    tokenType: 'Bearer',
+    expiresIn: Math.floor(config.sessionTtlHours * 3600),
+    redirect: result.user.role === 'admin' ? '/admin' : '/',
+  });
 });
 
 /* ------------------------------ 自助注册 ------------------------------ */
@@ -113,11 +119,18 @@ authRouter.post('/register', (req, res) => {
   // 注册完直接登录，省一次手动输入
   const { token } = createAuthSession(user.id, req);
   setSessionCookie(res, token, config.sessionTtlHours);
-  return res.status(201).json({ user: publicUser(user), redirect: '/' });
+  return res.status(201).json({
+    user: publicUser(user),
+    token,
+    tokenType: 'Bearer',
+    expiresIn: Math.floor(config.sessionTtlHours * 3600),
+    redirect: '/',
+  });
 });
 
 authRouter.post('/logout', (req, res) => {
-  const token = parseCookies(req.headers.cookie || '')[COOKIE_NAME];
+  // 必须用 readToken：只读 Cookie 的话，走 Bearer 的调用方点了退出、令牌却还活着
+  const token = readToken(req);
   if (token) {
     const row = query.get('SELECT * FROM auth_sessions WHERE token = ?', token);
     destroyAuthSession(token);

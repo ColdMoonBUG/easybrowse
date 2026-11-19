@@ -23,7 +23,7 @@
 | **各听各的声音** | 页面音频由注入钩子采集成 24kHz 单声道 PCM，只沿该用户自己的连接送回他的浏览器播放（WebAudio 排队，延迟约 100ms）。用户在顶栏点扬声器开启，服务器与管理端始终无声。覆盖页面 WebAudio、同源媒体与 MSE 流（B 站 / YouTube 这类主流视频站）；未声明 crossorigin 的跨域直链媒体受浏览器安全策略限制，声音拿不到 |
 | 管理后台 | 仪表盘（在线用户、活动会话、今日/累计流量、主机 CPU/内存/磁盘）、用户 CRUD 与配额、强制结束会话、流量统计与 CSV 导出、审计日志、浏览数据占用查看与清理、系统配置 |
 | 审计与计量 | 登录成功/失败/锁定、会话创建/恢复/结束、管理员操作、配额触发；互联网流量按用户/会话/日 汇总 |
-| **/nowapi 节点查询** | 读本机 v2rayN 的本地库，返回**当前选中**的代理节点分享链接（`vless://…` 等），切节点即刻生效；默认纯文本，`?format=json` 取结构化信息；支持 9 种协议链接还原；**`NOWAPI_TOKEN` 口令校验**（`?token=` 或 `X-Nowapi-Token`，常量时间比对）。另有**极简模式**把整站收敛成只回答这一个接口 |
+| **/nowapi 节点查询** | 读本机 v2rayN 的本地库，返回**当前选中**的代理节点分享链接（`vless://…` 等），切节点即刻生效；默认纯文本，`?format=json` 取结构化信息；支持 9 种协议链接还原；**`NOWAPI_TOKEN` 口令校验**（`?token=` 或 `X-Nowapi-Token`，常量时间比对）。另有**极简模式**把整站收敛成只回答 `/nowapi` + `/api/auth/*` |
 | 安全 | 短时一次性连接票据（默认 120s）代替会话 Token、后端强制校验会话所有权、CDP 只监听 127.0.0.1 随机端口、CSP / X-Frame-Options / nosniff、WebSocket 背压保护 |
 
 ## 2. 技术选型
@@ -73,7 +73,7 @@ npm start
 
 | 脚本 | 启动内容 | 什么时候用 |
 | --- | --- | --- |
-| **`start-nowapi.bat`** | **只开放 `/nowapi`**：登录页、工作区、管理后台、`/api/*`、画面 WebSocket 全部 404；不启动任何远端浏览器；frpc 照常由服务托管 | 这台机器只作为「节点查询接口」对外服务时（**默认用法**） |
+| **`start-nowapi.bat`** | **只开放接口**：`/nowapi` 与 `/api/auth/*` 认证接口可用；登录页、工作区、管理后台、其余 `/api/*`、画面 WebSocket 全部 404；不启动任何远端浏览器；frpc 照常由服务托管 | 这台机器只作为「节点查询 + 账号接口」对外服务时（**默认用法**） |
 | `start-easybrowse.bat` | 完整平台：登录、用户工作区、管理后台、远端浏览器、画面与音频通道 | 需要真正用远程浏览器时 |
 
 两个脚本都自己设置 `NOWAPI_ONLY` 环境变量，优先级高于 `.env`，所以不用改配置文件、也不用担心上次的模式残留。
@@ -200,6 +200,60 @@ ADMIN_INITIAL_PASSWORD= # 仅首次初始化生效
 | WS | `/ws/screen?ticket=…` | 画面与输入通道（票据 120 秒有效） |
 | GET | `/nowapi` | 返回本机代理（v2rayN）当前选中的节点；默认纯文本分享链接，`?format=json` 取结构化信息 |
 
+### 认证接口：注册 / 登录
+
+认证接口是纯 JSON，不依赖任何页面 —— 所以**极简模式下也照样可用**（其余接口仍 404）。
+
+登录态有两种携带方式，指向同一张 `auth_sessions` 表，任一处退出都会让另一边同时失效：
+
+| 场景 | 传法 |
+|---|---|
+| 浏览器 | `Set-Cookie: eb_sid=…; HttpOnly; SameSite=Lax`（自动） |
+| 脚本 / 第三方系统 | `Authorization: Bearer <token>`，token 从登录或注册的响应体里取 |
+
+```bash
+# 注册（成功直接登录，返回 201）
+curl -X POST "http://<host>:28471/api/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"your-password"}'
+# {"user":{"id":"…","username":"alice","role":"user","maxSessions":2,…},
+#  "token":"xq0tONW5…","tokenType":"Bearer","expiresIn":43200,"redirect":"/"}
+
+# 登录
+curl -X POST "http://<host>:28471/api/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"your-password"}'
+
+# 用拿到的 token 访问
+curl -H "Authorization: Bearer <token>" "http://<host>:28471/api/auth/me"
+# {"user":{"id":"…","username":"alice","role":"user",…}}
+
+# 退出（令牌立即失效，Bearer / Cookie 都会）
+curl -X POST -H "Authorization: Bearer <token>" "http://<host>:28471/api/auth/logout"
+
+# 改密（需登录）
+curl -X POST "http://<host>:28471/api/auth/password" \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer <token>" \
+  -d '{"currentPassword":"old","newPassword":"new"}'
+```
+
+字段与限制：
+
+- 用户名：`1-32` 位，仅字母、数字、下划线、点、短横线；大小写不敏感去重（`alice` 与 `Alice` 视为同一个）。
+- 密码：非空、≤ 128 位，**没有复杂度强制**（这是内网工具，不折腾用户；介意可自行加规则）。
+- 自助注册账号默认：流量不限（`quotaBytes: 0`）、并发 2 个会话、永久有效，`note` 标记为「自助注册」。
+- 令牌有效期 `expiresIn` 默认 12 小时（`SESSION_TTL_HOURS` 可调），过期或退出后立即失效。
+
+错误码：
+
+| 状态 | 含义 |
+|---|---|
+| `400` | 用户名格式不对 / 密码为空 / 超长 |
+| `401` | 用户名或密码错误；或令牌无效、已过期 |
+| `403` | 自助注册已关闭（设置项 `registrationEnabled=false`） |
+| `409` | 用户名已被占用 |
+| `429` | 注册过于频繁（每 IP 每小时 6 次）或登录失败次数超限（8 次锁 15 分钟） |
+
 ### /nowapi：查本机代理当前节点
 
 不登录也能访问（一般给外部脚本 / 手机快捷指令轮询用），数据直接读 v2rayN 的本地库，
@@ -237,13 +291,15 @@ curl "http://<host>:28471/nowapi?token=<your-token>&format=json"
   口令比对走 `crypto.timingSafeEqual`（先比长度再定长比内容），不用 `===` 免遭时序侧信道。
   改口令只需改 `.env` 后重启服务。
 
-#### 极简模式（只留这一个接口）
+#### 极简模式（只留接口，不开平台）
 
-`NOWAPI_ONLY=1` 时整个站点退化为「只回答 `/nowapi`」：
+`NOWAPI_ONLY=1` 时整个站点退化为「只回答几个 JSON 接口」：
 
-- 除 `/nowapi` 外，页面、`/api/*`、静态资源、画面 WebSocket **一律 404**（裸文本，不暴露原本是什么服务）；
+- 放行：`/nowapi` 与认证接口 `/api/auth/{login,register,logout,me,password}`；
+- 其余页面、`/api/*`、静态资源、画面 WebSocket **一律 404**（裸文本，不暴露原本是什么服务）；
+- 白名单是**精确路径集合**，不是前缀匹配 —— 以后新增 `/api/auth/xxx` 不会被自动放出去；
 - 不启动空闲回收等定时器，不接受任何会话，**反过来把上一轮遗留的远端浏览器进程在启动时清掉**；
-- frpc 托管、开机自启照常工作，`/nowapi` 之外没有任何可达入口。
+- frpc 托管、开机自启照常工作。
 
 判定顺序：环境变量 `NOWAPI_ONLY`（两个 `.bat` 启动器设置）> `data/autostart-mode.txt`（开机自启用）> 默认关闭。
 
@@ -260,6 +316,17 @@ curl "http://<host>:28471/nowapi?token=<your-token>&format=json"
   只留空时才退化为无鉴权，此时服务启动日志会打一条 WARN 提醒。
 - 用 `?token=` 传口令时，URL 可能被浏览器历史、代理日志、Referer 记录；脚本调用建议改用
   `X-Nowapi-Token` 请求头。响应带 `Cache-Control: no-store`，不会留在任何中间缓存里。
+- **极简模式下注册接口开放 = 任何知道地址的人都能注册账号。** 这些账号在极简模式下没有任何
+  可用功能，但会在 `users` 表里留下记录。不想被注册就把设置项关掉（服务运行中也能直接改库）：
+  ```bash
+  # 关闭自助注册
+  node --experimental-sqlite -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('./data/easybrowse.db');db.prepare(\"UPDATE settings SET value='false' WHERE key='registrationEnabled'\").run()"
+  ```
+  关掉后 `/api/auth/register` 返回 `403 自助注册已关闭`，已注册的账号仍能登录。
+- **经 frp 的 tcp 映射拿不到真实客户端 IP。** tcp 是纯透传，不会写 `X-Forwarded-For`。因此
+  `clientIp()` 只用 Express 解析过的 `req.ip`，不再采信请求头 —— 否则谁都能伪造 IP 绕过注册限流和
+  登录锁定。代价是此类部署下所有外部请求都算 `127.0.0.1`：注册限流（6 次/小时）与「同 IP 同账号
+  连续失败 8 次锁定」实际退化为全局限流。要拿到真实 IP 得改用 frp 的 `http` 映射或做 PROXY protocol。
 
 > 注意：通过 frp 的 tcp 映射以 **纯 HTTP** 暴露时，登录口令在公网是明文传输的。要真正安全只有两条路：本机提供 TLS（自签会告警，需自有域名证书），或在 VPS 上用 Caddy/Nginx 做 HTTPS 反代。见 `docs/DEPLOY.md`。
 

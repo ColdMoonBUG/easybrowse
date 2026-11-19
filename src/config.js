@@ -158,7 +158,13 @@ export const config = {
   /** 首次启动自动创建的管理员口令，未设置则随机生成并打印在控制台 */
   initialAdminPassword: process.env.ADMIN_INITIAL_PASSWORD || null,
   logLevel: process.env.LOG_LEVEL || 'info',
-  trustProxy: bool(process.env.TRUST_PROXY, true),
+  /**
+   * 信任几跳反向代理。默认 1（单层 Caddy/Nginx）。
+   *
+   * 不能设 true —— 那表示"所有代理都可信"，Express 会直接采信 X-Forwarded-For 最左值，
+   * 而 frp 的 tcp 映射根本不写这个头，等于把伪造权交给客户端，注册限流与登录锁定都会失效。
+   */
+  trustProxy: num(process.env.TRUST_PROXY, 1),
   /** WebSocket 短时连接票据有效期（秒） */
   ticketTtlSeconds: num(process.env.TICKET_TTL_SECONDS, 120),
 };
