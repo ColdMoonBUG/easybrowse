@@ -131,27 +131,72 @@ function tokenMatches(given, expected) {
 }
 
 /**
+ * /nowapi 的鉴权。
+ *
+ * 节点分享链接本身就是代理凭据，拿到就能连 —— 所以默认只认登录态：
+ *   1) Authorization: Bearer <登录令牌>（脚本），或浏览器带来的 eb_sid Cookie
+ *   2) 静态口令 ?token= / X-Nowapi-Token，仅在 NOWAPI_ALLOW_STATIC_TOKEN=1 时生效
+ *
+ * 会话校验走的是 auth_sessions 同一张表，所以用户在管理台被停用、被删号、
+ * 主动退出登录，这里会立刻跟着失效 —— 这正是固定口令做不到的事。
+ */
+function authorizeNowapi(req) {
+  const user = userByToken(req);
+  if (user) return { ok: true, via: 'session', user };
+
+  if (config.nowapiAllowStaticToken && config.nowapiToken) {
+    const given = req.query.token ?? req.get('x-nowapi-token') ?? '';
+    if (tokenMatches(given, config.nowapiToken)) return { ok: true, via: 'static', user: null };
+    return { ok: false, hint: 'token 无效' };
+  }
+
+  return {
+    ok: false,
+    hint: config.nowapiAllowStaticToken
+      ? '需要登录令牌或静态口令'
+      : '需要登录令牌（Authorization: Bearer <token>）',
+  };
+}
+
+/**
+ * 带 Authorization 头的跨域 GET 会先发预检，没有这个路由预检会落到 404 ——
+ * 浏览器里直连的客户端就永远拿不到节点。
+ */
+app.options('/nowapi', (_req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-Nowapi-Token');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '600');
+  res.status(204).end();
+});
+
+/**
  * GET /nowapi —— 返回本机代理（v2rayN）当前选中的节点。
  *
  * 默认吐纯文本，就是一行分享链接，curl / 手机快捷指令可以直接取；
  * 加 ?format=json 返回结构化信息（协议、名称、地址、端口、链接、读取时间）。
  *
- * 这条路由刻意不要求登录：它一般给外部脚本轮询用。但「节点链接」等于代理凭据，
- * 配了 NOWAPI_TOKEN 就必须带 ?token=xxx 或 X-Nowapi-Token 头才能取。
+ * 鉴权失败统一 401 + WWW-Authenticate，方便客户端判断是「该登录」而不是「没权限」。
  */
 app.get('/nowapi', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  // 允许前端在浏览器里直读响应体（否则带 Authorization 的跨域请求读不到内容）
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-Nowapi-Token');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
-  if (config.nowapiToken) {
-    const given = req.query.token ?? req.get('x-nowapi-token') ?? '';
-    if (!tokenMatches(given, config.nowapiToken)) {
-      return res.status(403).type('text/plain').send('403 forbidden：token 无效\n');
-    }
+  const wantsJson = String(req.query.format || '').toLowerCase() === 'json';
+  const auth = authorizeNowapi(req);
+
+  if (!auth.ok) {
+    res.setHeader('WWW-Authenticate', 'Bearer realm="nowapi"');
+    if (wantsJson) return res.status(401).json({ error: auth.hint });
+    return res.status(401).type('text/plain').send(`401 unauthorized：${auth.hint}\n`);
   }
+  // 取节点等于取代理凭据，成功留痕但不打到默认级别，避免被轮询刷满日志
+  logger.debug(`/nowapi 鉴权通过（${auth.via}${auth.user ? `: ${auth.user.username}` : ''}）from ${req.ip}`);
 
   const info = getCurrentNode();
-  const wantsJson = String(req.query.format || '').toLowerCase() === 'json';
 
   if (!info.ok) {
     if (wantsJson) return res.status(503).json(info);
@@ -172,6 +217,21 @@ app.get('/nowapi', (req, res) => {
 
   return res.type('text/plain').send(`${info.link}\n`);
 });
+
+/**
+ * 极简模式下注册一律关闭。
+ *
+ * 极简模式只对外开放 /nowapi，自助注册出来的账号没有任何可用功能 —— 它唯一的用途
+ * 反而是换一枚登录令牌去取节点。也就是说，注册开着等于把 /nowapi 的登录鉴权让给所有人。
+ *
+ * 按模式拦而不是去改数据库里的 registrationEnabled：切回完整模式后，注册是否开放
+ * 仍然由管理台那个开关决定，两套逻辑互不覆盖。
+ */
+if (config.nowapiOnly) {
+  app.use('/api/auth/register', (_req, res) =>
+    res.status(403).json({ error: '极简模式下不开放自助注册，请联系管理员开通账号' }),
+  );
+}
 
 app.use('/api/auth', authRouter);
 app.use('/api/sessions', sessionRouter);
@@ -248,12 +308,18 @@ server.listen(config.port, config.host, async () => {
   }
   // 可选：把 frpc 交给本服务托管（配置了 FRPC_CONFIG 才启用）
   startFrpc().catch((err) => logger.warn('启动 frpc 失败', err.message));
-  // /nowapi 会原文吐出当前节点链接，等于代理凭据；口令状态要显式打出来，方便排查
-  if (config.nowapiToken) {
-    logger.info('/nowapi 访问口令已启用（?token=… 或请求头 X-Nowapi-Token），未带口令一律 403');
+  // /nowapi 会原文吐出当前节点链接，等于代理凭据；鉴权模式要显式打出来，方便排查
+  if (config.nowapiAllowStaticToken) {
+    if (config.nowapiToken) {
+      logger.warn(
+        '/nowapi 静态口令回退已开启（?token=… / X-Nowapi-Token）：知道这串固定口令的人无需账号即可取节点，取完即用；不需要机器对机器调用时请置 NOWAPI_ALLOW_STATIC_TOKEN=0',
+      );
+    } else {
+      logger.warn('/nowapi 静态口令回退已开启但 NOWAPI_TOKEN 为空，该回退不生效 —— 仍然只认登录令牌');
+    }
   } else {
-    logger.warn(
-      `/nowapi 未设置 NOWAPI_TOKEN：任何能访问本服务的人都能取到当前代理节点（${config.publicUrl || `http://localhost:${config.port}`}/nowapi）`,
+    logger.info(
+      `/nowapi 鉴权：仅接受登录令牌（Authorization: Bearer <token> 或 eb_sid Cookie），匿名请求返回 401`,
     );
   }
 });

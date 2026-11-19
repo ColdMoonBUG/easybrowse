@@ -23,7 +23,7 @@
 | **各听各的声音** | 页面音频由注入钩子采集成 24kHz 单声道 PCM，只沿该用户自己的连接送回他的浏览器播放（WebAudio 排队，延迟约 100ms）。用户在顶栏点扬声器开启，服务器与管理端始终无声。覆盖页面 WebAudio、同源媒体与 MSE 流（B 站 / YouTube 这类主流视频站）；未声明 crossorigin 的跨域直链媒体受浏览器安全策略限制，声音拿不到 |
 | 管理后台 | 仪表盘（在线用户、活动会话、今日/累计流量、主机 CPU/内存/磁盘）、用户 CRUD 与配额、强制结束会话、流量统计与 CSV 导出、审计日志、浏览数据占用查看与清理、系统配置 |
 | 审计与计量 | 登录成功/失败/锁定、会话创建/恢复/结束、管理员操作、配额触发；互联网流量按用户/会话/日 汇总 |
-| **/nowapi 节点查询** | 读本机 v2rayN 的本地库，返回**当前选中**的代理节点分享链接（`vless://…` 等），切节点即刻生效；默认纯文本，`?format=json` 取结构化信息；支持 9 种协议链接还原；**`NOWAPI_TOKEN` 口令校验**（`?token=` 或 `X-Nowapi-Token`，常量时间比对）。另有**极简模式**把整站收敛成只回答 `/nowapi` + `/api/auth/*` |
+| **/nowapi 节点查询** | 读本机 v2rayN 的本地库，返回**当前选中**的代理节点分享链接（`vless://…` 等），切节点即刻生效；默认纯文本，`?format=json` 取结构化信息；支持 9 种协议链接还原；**登录令牌鉴权**（`Authorization: Bearer`，走 `auth_sessions` 会话校验，停用/退出即时失效；可选 `NOWAPI_ALLOW_STATIC_TOKEN` 静态口令回退）。另有**极简模式**把整站收敛成只回答 `/nowapi` + `/api/auth/*` |
 | 安全 | 短时一次性连接票据（默认 120s）代替会话 Token、后端强制校验会话所有权、CDP 只监听 127.0.0.1 随机端口、CSP / X-Frame-Options / nosniff、WebSocket 背压保护 |
 
 ## 2. 技术选型
@@ -250,7 +250,7 @@ curl -X POST "http://<host>:28471/api/auth/password" \
 |---|---|
 | `400` | 用户名格式不对 / 密码为空 / 超长 |
 | `401` | 用户名或密码错误；或令牌无效、已过期 |
-| `403` | 自助注册已关闭（设置项 `registrationEnabled=false`） |
+| `403` | 自助注册已关闭：设置项 `registrationEnabled=false`，或服务运行在极简模式（此时注册一律拒绝） |
 | `409` | 用户名已被占用 |
 | `429` | 注册过于频繁（每 IP 每小时 6 次）或登录失败次数超限（8 次锁 15 分钟） |
 
@@ -259,22 +259,45 @@ curl -X POST "http://<host>:28471/api/auth/password" \
 不登录也能访问（一般给外部脚本 / 手机快捷指令轮询用），数据直接读 v2rayN 的本地库，
 所以在 v2rayN 里切换节点后**下一次请求就会变**，不需要重启本服务。
 
-> **访问需要口令。** 节点链接里含 UUID 和服务器地址，等于代理凭据，所以 `NOWAPI_TOKEN`
-> 一经设置就必须带上口令，否则一律 `403 403 forbidden：token 无效`。
+> **默认要求登录。** 节点链接里含 UUID 和服务器地址，等于代理凭据 —— 拿到就能连。
+> 所以 `/nowapi` 认的是**账号体系的登录令牌**，不是某个固定字符串：匿名请求一律
+> `401`，并带 `WWW-Authenticate: Bearer` 提示该走哪条路。
 
 ```bash
-# 默认：一行分享链接，可直接订阅到别的客户端
-curl "http://<host>:28471/nowapi?token=<your-token>"
+# 1) 先登录换令牌（Cookie 与 Bearer 指向同一张 auth_sessions 表）
+curl -X POST http://<host>:28471/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"<user>","password":"<pass>"}'
+# {"ok":true,"user":{...},"token":"9f3c…","tokenType":"Bearer","expiresIn":43200}
+
+# 2) 带令牌取节点：默认一行分享链接，可直接订阅到别的客户端
+curl -H "Authorization: Bearer <token>" http://<host>:28471/nowapi
 # vless://bfd...@us.sa.openel.top:51386?encryption=none&security=tls&...#[vless]美国优化
 
-# 口令也可以放请求头（URL 里带口令会进浏览器历史 / 代理日志，脚本里推荐这种）
-curl -H "X-Nowapi-Token: <your-token>" http://<host>:28471/nowapi
-
-# 结构化信息
-curl "http://<host>:28471/nowapi?token=<your-token>&format=json"
+# 3) 结构化信息
+curl -H "Authorization: Bearer <token>" "http://<host>:28471/nowapi?format=json"
 # {"ok":true,"protocol":"vless","name":"[vless]美国优化","address":"us.sa.openel.top",
 #  "port":51386,"network":"ws","security":"tls","link":"vless://...","updatedAt":"...","source":{...}}
 ```
+
+鉴权失效的三种情况都会**当场**生效，这正是固定口令做不到的：
+
+| 动作 | 结果 |
+|---|---|
+| 用户在管理台退出登录 | 该令牌立即失效，`401` |
+| 用户被停用 / 删除 | 其所有令牌立即失效，`401` |
+| 令牌过期（默认 12 小时） | `401`，响应带 `WWW-Authenticate: Bearer` |
+
+**给无法走登录流程的机器对机器调用留的后门**（默认关闭）：
+
+```bash
+# .env —— 打开静态口令回退，并按下面命令生成一串口令填进 NOWAPI_TOKEN
+NOWAPI_ALLOW_STATIC_TOKEN=1
+node -e "console.log(require('crypto').randomBytes(18).toString('base64url'))"
+```
+
+开了之后 `?token=<口令>` 与请求头 `X-Nowapi-Token` 才可用。注意这等于绕开账号体系：
+禁号、停用都拦不住，只能靠轮换口令 —— 不需要时就该关掉，服务启动日志会一直 WARN 提醒。
 
 数据来源与实现要点：
 
@@ -286,16 +309,17 @@ curl "http://<host>:28471/nowapi?token=<your-token>&format=json"
   `custom`（整份 yaml）与 `wireguard`（字段过多）没有单条 URI 表示，会返回 501 并提示用 JSON。
 - 起不来的三种情况都有明确错误码：`v2rayn_not_found`（找不到目录，配 `V2RAYN_DIR`）、
   `no_selection`（v2rayN 里没选节点）、`db_read_failed`（文件被占用）。
-- 配置项：`V2RAYN_DIR` 指定 v2rayN 便携版根目录（留空自动探测常见落点）；
-  `NOWAPI_TOKEN` 是访问口令，设了之后必须带 `?token=xxx` 或 `X-Nowapi-Token` 头，否则 403。
-  口令比对走 `crypto.timingSafeEqual`（先比长度再定长比内容），不用 `===` 免遭时序侧信道。
-  改口令只需改 `.env` 后重启服务。
+- 配置项：`V2RAYN_DIR` 指定 v2rayN 便携版根目录（留空自动探测常见落点）。
+  响应统一带 `Cache-Control: no-store`，节点链接不会被任何中间缓存留下。
 
 #### 极简模式（只留接口，不开平台）
 
 `NOWAPI_ONLY=1` 时整个站点退化为「只回答几个 JSON 接口」：
 
-- 放行：`/nowapi` 与认证接口 `/api/auth/{login,register,logout,me,password}`；
+- 放行：`/nowapi` 与认证接口 `/api/auth/{login,logout,me,password}`；
+- **自助注册在这个模式下被直接拦掉**（`403 极简模式下不开放自助注册`）—— 极简模式注册出来的
+  账号没有任何可用功能，唯一用途反而是换令牌去取节点，等于把 `/nowapi` 的登录鉴权让给所有人；
+  这条按模式拦，不覆盖数据库里的 `registrationEnabled`，切回完整模式后仍由管理台那个开关决定；
 - 其余页面、`/api/*`、静态资源、画面 WebSocket **一律 404**（裸文本，不暴露原本是什么服务）；
 - 白名单是**精确路径集合**，不是前缀匹配 —— 以后新增 `/api/auth/xxx` 不会被自动放出去；
 - 不启动空闲回收等定时器，不接受任何会话，**反过来把上一轮遗留的远端浏览器进程在启动时清掉**；
@@ -312,12 +336,14 @@ curl "http://<host>:28471/nowapi?token=<your-token>&format=json"
 - 远端浏览器被限制访问回环 / 内网 / 链路本地 / 云元数据地址，避免被当成内网跳板（`BLOCK_PRIVATE_NETWORK=1`）。
 - 不记录网页正文、表单内容、密码或 Cookie；不解密 HTTPS。
 - **`/nowapi` 会原文吐出代理节点链接，等价于公开代理凭据**（含 UUID、服务器地址、SNI）。
-  因此 `NOWAPI_TOKEN` 必须设置：本机已在 `.env` 里配置了随机口令，未带口令的请求一律 403；
-  只留空时才退化为无鉴权，此时服务启动日志会打一条 WARN 提醒。
-- 用 `?token=` 传口令时，URL 可能被浏览器历史、代理日志、Referer 记录；脚本调用建议改用
-  `X-Nowapi-Token` 请求头。响应带 `Cache-Control: no-store`，不会留在任何中间缓存里。
-- **极简模式下注册接口开放 = 任何知道地址的人都能注册账号。** 这些账号在极简模式下没有任何
-  可用功能，但会在 `users` 表里留下记录。不想被注册就把设置项关掉（服务运行中也能直接改库）：
+  因此它默认只认**登录令牌**（`Authorization: Bearer` 或 `eb_sid` Cookie），匿名一律 401；
+  账号被停用、删号、主动退出，取节点权限同步失效。只有显式打开 `NOWAPI_ALLOW_STATIC_TOKEN=1`
+  并配置 `NOWAPI_TOKEN` 时，才额外接受固定口令 —— 那等于把凭据让给任何知道这串字符的人，
+  与账号体系无关，启动日志会一直 WARN。
+- 用 `?token=` 传口令时，URL 可能被浏览器历史、代理日志、Referer 记录；确实需要静态口令时，
+  脚本调用请改用 `X-Nowapi-Token` 请求头。响应带 `Cache-Control: no-store`，不会留在任何中间缓存里。
+- **极简模式下注册接口已由代码直接关闭**，不必再依赖设置项。完整模式下如果开着自助注册，
+  任何知道地址的人仍能注册账号 —— 不想被注册就把设置项关掉（服务运行中也能直接改库）：
   ```bash
   # 关闭自助注册
   node --experimental-sqlite -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('./data/easybrowse.db');db.prepare(\"UPDATE settings SET value='false' WHERE key='registrationEnabled'\").run()"

@@ -142,10 +142,18 @@ export const config = {
   /**
    * /nowapi 读取的 v2rayN 便携版目录；留空则按常见落点自动探测。
    * 这个接口会把当前节点的分享链接原样吐出来，等价于公开代理凭据，
-   * 所以对外部署时务必配 NOWAPI_TOKEN。
+   * 所以默认要求登录态（Authorization: Bearer / Cookie 会话）。
    */
   v2rayNDir: process.env.V2RAYN_DIR || '',
   nowapiToken: process.env.NOWAPI_TOKEN || '',
+  /**
+   * 是否额外接受静态口令（?token=… 或 X-Nowapi-Token）。默认关闭。
+   *
+   * 开着它等于「知道这串固定字符就能取节点」，与账号体系无关 —— 会话被禁用、
+   * 用户被停用都拦不住，只能靠轮换口令。仅当你确实要给无法登录的机器对机器
+   * 场景留后门时才打开，且口令应当足够长。
+   */
+  nowapiAllowStaticToken: bool(process.env.NOWAPI_ALLOW_STATIC_TOKEN, false),
   /**
    * 极简模式：只开放 /nowapi，其余页面、接口、WebSocket 全部关闭，
    * 启动时还会把上一轮遗留的远端浏览器进程清掉，之后不再接受任何会话。
