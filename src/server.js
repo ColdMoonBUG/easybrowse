@@ -218,21 +218,6 @@ app.get('/nowapi', (req, res) => {
   return res.type('text/plain').send(`${info.link}\n`);
 });
 
-/**
- * 极简模式下注册一律关闭。
- *
- * 极简模式只对外开放 /nowapi，自助注册出来的账号没有任何可用功能 —— 它唯一的用途
- * 反而是换一枚登录令牌去取节点。也就是说，注册开着等于把 /nowapi 的登录鉴权让给所有人。
- *
- * 按模式拦而不是去改数据库里的 registrationEnabled：切回完整模式后，注册是否开放
- * 仍然由管理台那个开关决定，两套逻辑互不覆盖。
- */
-if (config.nowapiOnly) {
-  app.use('/api/auth/register', (_req, res) =>
-    res.status(403).json({ error: '极简模式下不开放自助注册，请联系管理员开通账号' }),
-  );
-}
-
 app.use('/api/auth', authRouter);
 app.use('/api/sessions', sessionRouter);
 app.use('/api/admin', adminRouter);

@@ -54,14 +54,27 @@ authRouter.post('/login', (req, res) => {
 /* ------------------------------ 自助注册 ------------------------------ */
 
 /**
- * 每个 IP 每小时的注册次数上限。
- * 公网自助注册最容易被人当免费资源刷，加一层简单限流；正常用户远用不到 6 个。
+ * 注册次数上限（每个 IP 每小时）。
+ *
+ * 注意 registry 是「按 IP」的，而经 frp 的 tcp 映射时拿不到真实客户端地址 ——
+ * 所有外部请求的 req.ip 都是 127.0.0.1，于是这个「每 IP」实际退化成「全站」。
+ * 所以阈值不能按单机 6 次来定，否则全网友好分享时第 7 个人就撞 429。
+ * 用 REGISTER_LIMIT_PER_HOUR 调，配 0 表示不限制。
  */
-const REGISTER_LIMIT = 6;
+const REGISTER_LIMIT = resolveRegisterLimit();
 const REGISTER_WINDOW_MS = 60 * 60 * 1000;
 const registerHits = new Map(); // ip -> number[]
 
+function resolveRegisterLimit() {
+  const raw = process.env.REGISTER_LIMIT_PER_HOUR;
+  if (raw === undefined || raw === '') return 30;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 30;
+  return Math.floor(n);
+}
+
 function allowRegister(ip) {
+  if (REGISTER_LIMIT === 0) return true;
   const now = Date.now();
   const list = (registerHits.get(ip) || []).filter((t) => now - t < REGISTER_WINDOW_MS);
   if (list.length >= REGISTER_LIMIT) {

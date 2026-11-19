@@ -250,9 +250,9 @@ curl -X POST "http://<host>:28471/api/auth/password" \
 |---|---|
 | `400` | 用户名格式不对 / 密码为空 / 超长 |
 | `401` | 用户名或密码错误；或令牌无效、已过期 |
-| `403` | 自助注册已关闭：设置项 `registrationEnabled=false`，或服务运行在极简模式（此时注册一律拒绝） |
+| `403` | 自助注册已关闭（设置项 `registrationEnabled=false`） |
 | `409` | 用户名已被占用 |
-| `429` | 注册过于频繁（每 IP 每小时 6 次）或登录失败次数超限（8 次锁 15 分钟） |
+| `429` | 注册过于频繁（默认每 IP 每小时 30 次，`REGISTER_LIMIT_PER_HOUR` 可调；tcp 透传下为全站共享）或登录失败次数超限（8 次锁 15 分钟） |
 
 ### /nowapi：查本机代理当前节点
 
@@ -316,16 +316,19 @@ node -e "console.log(require('crypto').randomBytes(18).toString('base64url'))"
 
 `NOWAPI_ONLY=1` 时整个站点退化为「只回答几个 JSON 接口」：
 
-- 放行：`/nowapi` 与认证接口 `/api/auth/{login,logout,me,password}`；
-- **自助注册在这个模式下被直接拦掉**（`403 极简模式下不开放自助注册`）—— 极简模式注册出来的
-  账号没有任何可用功能，唯一用途反而是换令牌去取节点，等于把 `/nowapi` 的登录鉴权让给所有人；
-  这条按模式拦，不覆盖数据库里的 `registrationEnabled`，切回完整模式后仍由管理台那个开关决定；
+- 放行：`/nowapi` 与认证接口 `/api/auth/{login,register,logout,me,password}`；
+- **自助注册在这个模式下同样开放**（受 `registrationEnabled` 控制，默认开）—— 新用户注册后
+  直接拿令牌取节点，适合把节点当订阅分发的用法；
 - 其余页面、`/api/*`、静态资源、画面 WebSocket **一律 404**（裸文本，不暴露原本是什么服务）；
 - 白名单是**精确路径集合**，不是前缀匹配 —— 以后新增 `/api/auth/xxx` 不会被自动放出去；
 - 不启动空闲回收等定时器，不接受任何会话，**反过来把上一轮遗留的远端浏览器进程在启动时清掉**；
 - frpc 托管、开机自启照常工作。
 
 判定顺序：环境变量 `NOWAPI_ONLY`（两个 `.bat` 启动器设置）> `data/autostart-mode.txt`（开机自启用）> 默认关闭。
+
+> **注册限流在 tcp 透传下是全局的。** 经 frp 的 tcp 映射拿不到真实客户端 IP，所有外部请求
+> 都算 `127.0.0.1`，于是「每 IP 每小时 N 次」实际退化成「全站每小时 N 次」。默认
+> `REGISTER_LIMIT_PER_HOUR=30`，按实际分享规模调；填 `0` 表示不限。
 
 
 ## 7. 安全说明
@@ -342,13 +345,15 @@ node -e "console.log(require('crypto').randomBytes(18).toString('base64url'))"
   与账号体系无关，启动日志会一直 WARN。
 - 用 `?token=` 传口令时，URL 可能被浏览器历史、代理日志、Referer 记录；确实需要静态口令时，
   脚本调用请改用 `X-Nowapi-Token` 请求头。响应带 `Cache-Control: no-store`，不会留在任何中间缓存里。
-- **极简模式下注册接口已由代码直接关闭**，不必再依赖设置项。完整模式下如果开着自助注册，
-  任何知道地址的人仍能注册账号 —— 不想被注册就把设置项关掉（服务运行中也能直接改库）：
+- **自助注册默认开放**，注册即可取节点（极简模式下也是）。这意味着 `/nowapi` 的登录鉴权
+  等价于「任何愿意花十秒注册的人」。不想被陌生人注册就把设置项关掉（服务运行中也能直接改库），
+  或用注册限流控制规模：
   ```bash
   # 关闭自助注册
   node --experimental-sqlite -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('./data/easybrowse.db');db.prepare(\"UPDATE settings SET value='false' WHERE key='registrationEnabled'\").run()"
   ```
-  关掉后 `/api/auth/register` 返回 `403 自助注册已关闭`，已注册的账号仍能登录。
+  关掉后 `/api/auth/register` 返回 `403 自助注册已关闭`，已注册的账号仍能登录、仍能取节点。
+- **注册限流在 tcp 透传下是全局的**（见极简模式一节），用 `REGISTER_LIMIT_PER_HOUR` 调整。
 - **经 frp 的 tcp 映射拿不到真实客户端 IP。** tcp 是纯透传，不会写 `X-Forwarded-For`。因此
   `clientIp()` 只用 Express 解析过的 `req.ip`，不再采信请求头 —— 否则谁都能伪造 IP 绕过注册限流和
   登录锁定。代价是此类部署下所有外部请求都算 `127.0.0.1`：注册限流（6 次/小时）与「同 IP 同账号
